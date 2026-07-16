@@ -21,6 +21,31 @@ $step = (int)($_GET['step'] ?? 1);
 $error = '';
 $success = '';
 
+function executeSchemaStatements(PDO $pdo, string $sql): void
+{
+    $statement = '';
+    $lines = preg_split("/\r\n|\n|\r/", $sql);
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+
+        if ($trimmed === '' || strpos($trimmed, '--') === 0 || strpos($trimmed, '#') === 0) {
+            continue;
+        }
+
+        $statement .= $line . "\n";
+
+        if (substr($trimmed, -1) === ';') {
+            $pdo->exec($statement);
+            $statement = '';
+        }
+    }
+
+    if (trim($statement) !== '') {
+        $pdo->exec($statement);
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -55,15 +80,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $dsn = 'mysql:host=' . $setup['dbHost'] . ';dbname=' . $setup['dbName'] . ';charset=utf8mb4';
                 $pdo = new PDO($dsn, $setup['dbUser'], $setup['dbPass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
                 $sql = file_get_contents(__DIR__ . '/includes/schema.sql');
-                // Execute each statement
-                $statements = array_filter(array_map('trim', explode(';', $sql)));
-                foreach ($statements as $stmt) {
-                    if (!empty($stmt) && !preg_match('/^--/', $stmt) && !preg_match('/^SET\s+NAMES/i', $stmt)) {
-                        $pdo->exec($stmt);
-                    } elseif (preg_match('/^SET\s+/i', $stmt)) {
-                        try { $pdo->exec($stmt); } catch (Exception $e) {}
-                    }
+                if ($sql === false) {
+                    throw new RuntimeException('Nie można odczytać pliku schematu bazy danych.');
                 }
+
+                executeSchemaStatements($pdo, $sql);
+
                 $step = 3;
                 $success = 'Struktura bazy danych utworzona pomyślnie!';
             } catch (PDOException $e) {
